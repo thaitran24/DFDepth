@@ -147,7 +147,7 @@ class MonoPairDataset(data.Dataset):
         frame_index = int(line[1])
 
         if folder[0] == 'd':
-            folder2 = folder + '_fake_night'
+            folder2 = folder + '_fake_night_mcie'
         else:
             folder2 = folder + '_fake_day'
 

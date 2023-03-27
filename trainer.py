@@ -14,7 +14,6 @@ from torchvision import transforms
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from tensorboardX import SummaryWriter
 
 import json
@@ -46,7 +45,6 @@ class Trainer:
         self.models = {}
         self.classifiers = {}
         self.parameters_to_train = []
-        self.parameters_to_train_D = []
 
         self.device = torch.device("cpu" if self.opt.no_cuda else "cuda")
 
@@ -72,11 +70,8 @@ class Trainer:
             self.models["encoder"].num_ch_enc, self.opt.scales)
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
-
-        if self.opt.freeze_depth_dec:
-            self.models["depth"].eval()
                 
-        if self.opt.load_pseudo_model and not self.opt.only_im2im:
+        if self.opt.load_pseudo_model:
             self.pseudo_models = {}
             # Pseudo Model Encoder and Decoder
             self.pseudo_models["encoder"] = networks.ResnetEncoder(
@@ -117,10 +112,6 @@ class Trainer:
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1)
         
-        self.model_optimizer_D = optim.Adam(self.parameters_to_train_D, self.opt.learning_rate)
-        self.model_lr_scheduler_D = optim.lr_scheduler.StepLR(
-            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
-
         if self.opt.load_weights_folder is not None:
             self.load_model()
 
@@ -193,11 +184,7 @@ class Trainer:
             "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
 
         print("Using split:\n  ", self.opt.split)
-        if not self.opt.only_im2im:
-            print("There are {:d} training items and {:d} validation items\n".format(
-                len(train_dataset) * 2, len(val_day_dataset) + len(val_night_dataset)))
-        else:
-            print("There are {:d} training items \n".format(len(train_dataset) * 2))
+        print("There are {:d} training items \n".format(len(train_dataset) * 2))
             
         self.save_opts()
 
@@ -228,7 +215,6 @@ class Trainer:
         """Run a single epoch of training and validation
         """
         self.model_lr_scheduler.step()
-        self.model_lr_scheduler_D.step()
 
         print("Training")
         self.set_train()
@@ -239,10 +225,7 @@ class Trainer:
             losses = self.process_batch(inputs)
 
             self.model_optimizer.zero_grad()
-            self.model_optimizer_D.zero_grad()
-            
             losses["loss"].backward()
-
             self.model_optimizer.step()
 
             duration = time.time() - before_op_time
@@ -263,9 +246,8 @@ class Trainer:
 
             self.step += 1
 
-        if not self.opt.only_im2im:
-            self.evaluate(day=True)
-            self.evaluate(day=False)
+        self.evaluate(day=True)
+        self.evaluate(day=False)
 
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
@@ -762,50 +744,15 @@ class Trainer:
             self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
         print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}" + \
             " | loss: {:.5f} | loss day: {:.5f} | loss night: {:.5f}" + \
-                " | loss D: {:.5f} | loss G: {:.5f} | loss inner: {:.5f}" + \
-                    " | loss outer: {:.5f} | loss depth: {:.5f} | loss feat: {:.5f}" + \
-                        " | loss percep: {:.5f} |  time elapsed: {} | time left: {}"
+                " | loss depth sim: {:.5f} | loss feat sim: {:.5f} |  time elapsed: {} | time left: {}"
         loss = losses["loss"].cpu().data
-        loss_day = 0
-        loss_night = 0
-        loss_depth = 0
-        loss_percep = 0
-        loss_D = 0
-        loss_G = 0
-        loss_inner = 0
-        loss_outer = 0
-        loss_feat = 0
-        
-        if not self.opt.only_im2im:
-            if DAY_PHASE in self.opt.phase:
-                loss_day += losses["p1/depth"].cpu().data
-                loss_depth += losses["p1/depth_sim"].cpu().data
-            if NIGHT_PHASE in self.opt.phase:
-                loss_depth += losses["p2/depth_sim"].cpu().data
-                loss_night += losses["p2/depth"].cpu().data
-        
-        if not self.opt.no_percep:
-            if DAY_PHASE in self.opt.phase:
-                loss_percep += losses["p1/percep"].cpu().data
-            if NIGHT_PHASE in self.opt.phase:
-                loss_percep += losses["p2/percep"].cpu().data
-        
-        if DAY_PHASE in self.opt.phase:
-            loss_D += losses["p1/D"].cpu().data
-            loss_G += losses["p1/G"].cpu().data
-            loss_inner += losses["p1/inner_sim"].cpu().data
-            loss_outer += losses["p1/outer_sim"].cpu().data
-            loss_feat += losses["p1/feat_sim"].cpu().data
-        if NIGHT_PHASE in self.opt.phase:
-            loss_D += losses["p2/D"].cpu().data
-            loss_G += losses["p2/G"].cpu().data
-            loss_inner += losses["p2/inner_sim"].cpu().data
-            loss_outer += losses["p2/outer_sim"].cpu().data
-            loss_feat += losses["p2/feat_sim"].cpu().data
+        loss_day = losses["day"].cpu().data
+        loss_night = losses["night"].cpu().data
+        loss_depth_sim = losses["depth_sim"].cpu().data
+        loss_feat_sim = losses["feat_sim"].cpu().data
         
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss, \
-                                loss_day, loss_night, loss_D, loss_G, loss_inner, \
-                                loss_outer, loss_depth, loss_feat, loss_percep, \
+                                loss_day, loss_night, loss_depth_sim, loss_feat_sim, \
                                 sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
             
 
@@ -891,68 +838,3 @@ class Trainer:
             pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
             model_dict.update(pretrained_dict)
             self.pseudo_models[n].load_state_dict(model_dict)
-    
-    def load_day_dec(self):
-        """Load model(s) from disk
-        """
-        self.opt.load_day_dec = os.path.expanduser(self.opt.load_day_dec)
-
-        assert os.path.isdir(self.opt.load_day_dec), \
-            "Cannot find folder {}".format(self.opt.load_day_dec)
-        print("loading model from folder {}".format(self.opt.load_day_dec))
-
-        for n in ["day_dec"]:
-            print("Loading {} weights...".format(n))
-            path = os.path.join(self.opt.load_day_dec, "{}.pth".format(n))
-            model_dict = self.models[n].state_dict()
-            pretrained_dict = torch.load(path)
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-            model_dict.update(pretrained_dict)
-            self.models[n].load_state_dict(model_dict)
-    
-    def load_night_dec(self):
-        """Load model(s) from disk
-        """
-        self.opt.load_night_dec = os.path.expanduser(self.opt.load_night_dec)
-
-        assert os.path.isdir(self.opt.load_night_dec), \
-            "Cannot find folder {}".format(self.opt.load_night_dec)
-        print("loading model from folder {}".format(self.opt.load_night_dec))
-
-        for n in ["night_dec"]:
-            print("Loading {} weights...".format(n))
-            path = os.path.join(self.opt.load_night_dec, "{}.pth".format(n))
-            model_dict = self.models[n].state_dict()
-            pretrained_dict = torch.load(path)
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-            model_dict.update(pretrained_dict)
-            self.models[n].load_state_dict(model_dict)
-
-    def transfer_inputs(self, inputs, renders):
-        self.resize = {}
-        pil_to_tensor = transforms.Compose([
-            transforms.PILToTensor()
-        ])
-
-        for i in self.opt.scales:
-            renders[("K", i)] = inputs[("K", i)]
-            renders[("inv_K", i)] = inputs[("inv_K", i)]
-        
-        for i in self.opt.scales:
-            s = 2 ** i
-            self.resize[i] = transforms.Resize((self.opt.height // s, self.opt.width // s), \
-                                                interpolation=Image.ANTIALIAS)
-            shape = renders[("render", 0)].shape
-            renders[("color", 0, i)] = torch.zeros([shape[0], shape[1], self.opt.height // s, self.opt.width // s]).to(self.device)
-            renders[("color_aug", 0, i)] = torch.zeros([shape[0], shape[1], self.opt.height // s, self.opt.width // s]).to(self.device)
-            for b in range(shape[0]):
-                img = transforms.functional.to_pil_image(renders[("render", 0)][b])
-                img = self.resize[i](img)
-                renders[("color", 0, i)][b] = pil_to_tensor(img).to(self.device) 
-                renders[("color_aug", 0, i)][b] = pil_to_tensor(img).to(self.device)
-
-        for fr in [-1, 1]:
-            for i in self.opt.scales:
-                renders[("color", fr, i)] = inputs[("color_f", fr, i)]
-                renders[("color_aug", fr, i)] = inputs[("color_f_aug", fr, i)]
-

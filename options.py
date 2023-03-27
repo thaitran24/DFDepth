@@ -88,6 +88,9 @@ class MonodepthOptions:
         self.parser.add_argument("--only_day_reprojection",
                                  help="if set, use depth only for day image reprojection",
                                  action="store_true")
+        self.parser.add_argument("--use_stereo",
+                                 help="if set, use day pose for night image",
+                                 action="store_true")
         self.parser.add_argument("--use_day_pose",
                                  help="if set, use day pose for night image",
                                  action="store_true")
@@ -166,12 +169,6 @@ class MonodepthOptions:
         self.parser.add_argument("--load_pseudo_model",
                                  type=str,
                                  help="name of pseudo model to load")
-        self.parser.add_argument("--load_day_dec",
-                                 type=str,
-                                 help="name of day decoder to load")
-        self.parser.add_argument("--load_night_dec",
-                                 type=str,
-                                 help="name of night decoder to load")
         self.parser.add_argument("--models_to_load",
                                  nargs="+",
                                  type=str,
