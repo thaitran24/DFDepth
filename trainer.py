@@ -135,7 +135,7 @@ class Trainer:
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
 
-        if not self.train_day_only:
+        if not self.opt.train_day_only:
             self.pair_dataset = datasets_dict["oxford_pair"]
             train_dataset = self.pair_dataset(
                 self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
@@ -269,13 +269,13 @@ class Trainer:
         day_features = self.models["encoder"](inputs["color_aug", 0, 0])
         day_outputs = self.models["depth"](day_features)
 
-        if not self.train_day_only:
+        if not self.opt.train_day_only:
             night_features = self.models["encoder"](inputs["color_f_aug", 0, 0])
             night_outputs = self.models["depth"](night_features)
 
         day_pose_outputs = self.predict_poses(inputs, day_features, is_night=False)
         day_outputs.update(day_pose_outputs)
-        if not self.train_day_only:
+        if not self.opt.train_day_only:
             if self.opt.use_day_pose:
                 for key, value in day_pose_outputs.items():
                     night_outputs[key] = value.detach()
@@ -285,13 +285,13 @@ class Trainer:
         if not self.opt.only_day_reprojection:
             self.generate_images_pred(inputs, day_outputs, is_night=False)
             losses_day = self.compute_losses(inputs, day_outputs, is_night=False)
-            if not self.train_day_only:
+            if not self.opt.train_day_only:
                 self.generate_images_pred(inputs, night_outputs, is_night=True)
                 losses_night = self.compute_losses(inputs, night_outputs, is_night=True)
         else:
             self.generate_images_pred(inputs, day_outputs, is_night=False)
             losses_day = self.compute_losses(inputs, day_outputs, is_night=False)
-            if not self.train_day_only:
+            if not self.opt.train_day_only:
                 self.generate_images_pred(inputs, night_outputs, is_night=False)
                 losses_night = self.compute_losses(inputs, night_outputs, is_night=False)
 
@@ -300,7 +300,7 @@ class Trainer:
         losses["depth_sim"] = 0
         losses["feat_sim"] = 0
 
-        if not self.train_day_only:
+        if not self.opt.train_day_only:
             losses["night"] = losses_night["loss"]  
 
             pseudo_label = day_outputs[("disp", 0)].detach()
@@ -785,10 +785,16 @@ class Trainer:
             " | loss: {:.5f} | loss day: {:.5f} | loss night: {:.5f}" + \
                 " | loss depth sim: {:.5f} | loss feat sim: {:.5f} |  time elapsed: {} | time left: {}"
         loss = losses["loss"].cpu().data
-        loss_day = losses["day"].cpu().data
-        loss_night = losses["night"].cpu().data
-        loss_depth_sim = losses["depth_sim"].cpu().data
-        loss_feat_sim = losses["feat_sim"].cpu().data
+        loss_day = 0
+        loss_night = 0
+        loss_depth_sim = 0
+        loss_feat_sim = 0
+    
+        if not self.opt.train_day_only:
+            loss_day = losses["day"].cpu().data
+            loss_night = losses["night"].cpu().data
+            loss_depth_sim = losses["depth_sim"].cpu().data
+            loss_feat_sim = losses["feat_sim"].cpu().data
         
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss, \
                                 loss_day, loss_night, loss_depth_sim, loss_feat_sim, \
