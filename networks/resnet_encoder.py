@@ -88,7 +88,7 @@ class ResnetEncoder(nn.Module):
         if self.dida_level == 1:
             self.layer_dida = DIDABlock(self.num_ch_enc[1], self.num_ch_enc[1])
         else:
-            self.inplanes = 64
+            self.inplanes = 256
             self.layer_dida = self._make_dida_layer(DIDABlock, self.num_ch_enc[4], blocks=2, stride=2)
             
     def forward(self, input_image):
@@ -100,15 +100,17 @@ class ResnetEncoder(nn.Module):
         if self.dida_level == 1:
             self.features.append(self.layer_dida(x))
         elif self.dida_level == 4:
-            self.features.append(self.encoder.maxpool(x))
+            self.features.append(x)
         self.features.append(self.encoder.layer1(self.encoder.maxpool(self.features[-1])))
         self.features.append(self.encoder.layer2(self.features[-1]))
         self.features.append(self.encoder.layer3(self.features[-1]))
         if self.dida_level == 4:
             x1 = self.layer_dida(self.features[-1])
             x2 = self.encoder.layer4(self.features[-1])
-            self.features.append(x1 + x2)
+            x = x1 + x2
+            self.features.append(x)
         else:
+            x = self.encoder.layer4(self.features[-1])
             self.features.append(self.encoder.layer4(self.features[-1]))
 
         return self.features
