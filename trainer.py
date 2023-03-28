@@ -235,7 +235,7 @@ class Trainer:
             # late_phase = self.step % 2000 == 0
 
             # if early_phase or late_phase:
-            if batch_idx % 200 == 0:
+            if batch_idx % 500 == 0:
                 self.log_time(batch_idx, duration, losses)
 
                 # if "depth_gt" in day_inputs:
@@ -291,7 +291,8 @@ class Trainer:
         losses["feat_sim"] = 0
         for i in range(self.num_scales):
             losses["feat_sim"] += self.l1_loss(day_features[i].detach(), night_features[i])
-        losses["feat_sim"] *= self.opy.lambda_feat_sim
+        losses["feat_sim"] /= self.num_scales
+        losses["feat_sim"] *= self.opt.lambda_feat_sim
 
         losses["loss"] += losses["day"] + losses["night"] + losses["depth_sim"] + losses["feat_sim"]
 
@@ -628,7 +629,7 @@ class Trainer:
 
         return reprojection_loss
 
-    def compute_losses(self, inputs, outputs):
+    def compute_losses(self, inputs, outputs, is_night):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
@@ -644,8 +645,12 @@ class Trainer:
                 source_scale = 0
 
             disp = outputs[("disp", scale)]
-            color = inputs[("color", 0, scale)]
-            target = inputs[("color", 0, source_scale)]
+            if is_night:
+                color = inputs[("color_f", 0, scale)]
+                target = inputs[("color_f", 0, source_scale)]
+            else:
+                color = inputs[("color", 0, scale)]
+                target = inputs[("color", 0, source_scale)]
 
             for frame_id in self.opt.frame_ids[1:]:
                 pred = outputs[("color", frame_id, scale)]
@@ -656,7 +661,10 @@ class Trainer:
             if not self.opt.disable_automasking:
                 identity_reprojection_losses = []
                 for frame_id in self.opt.frame_ids[1:]:
-                    pred = inputs[("color", frame_id, source_scale)]
+                    if is_night:
+                        pred = inputs[("color_f", frame_id, source_scale)]
+                    else:
+                        pred = inputs[("color", frame_id, source_scale)]
                     identity_reprojection_losses.append(
                         self.compute_reprojection_loss(pred, target))
 
@@ -668,6 +676,20 @@ class Trainer:
                     # save both images, and do min all at once below
                     identity_reprojection_loss = identity_reprojection_losses
 
+            elif self.opt.predictive_mask:
+                # use the predicted mask
+                mask = outputs["predictive_mask"]["disp", scale]
+                if not self.opt.v1_multiscale:
+                    mask = F.interpolate(
+                        mask, [self.opt.height, self.opt.width],
+                        mode="bilinear", align_corners=False)
+
+                reprojection_losses *= mask
+
+                # add a loss pushing mask to 1 (using nn.BCELoss for stability)
+                weighting_loss = 0.2 * nn.BCELoss()(mask, torch.ones(mask.shape).cuda())
+                loss += weighting_loss.mean()
+
             if self.opt.avg_reprojection:
                 reprojection_loss = reprojection_losses.mean(1, keepdim=True)
             else:
@@ -676,7 +698,7 @@ class Trainer:
             if not self.opt.disable_automasking:
                 # add random numbers to break ties
                 identity_reprojection_loss += torch.randn(
-                    identity_reprojection_loss.shape, device=self.device) * 0.00001
+                    identity_reprojection_loss.shape).cuda() * 0.00001
 
                 combined = torch.cat((identity_reprojection_loss, reprojection_loss), dim=1)
             else:
@@ -812,14 +834,14 @@ class Trainer:
             model_dict.update(pretrained_dict)
             self.models[n].load_state_dict(model_dict)
 
-        # loading adam state
-        optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
-        if os.path.isfile(optimizer_load_path):
-            print("Loading Adam weights")
-            optimizer_dict = torch.load(optimizer_load_path)
-            self.model_optimizer.load_state_dict(optimizer_dict)
-        else:
-            print("Cannot find Adam weights so Adam is randomly initialized")
+        # # loading adam state
+        # optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
+        # if os.path.isfile(optimizer_load_path):
+        #     print("Loading Adam weights")
+        #     optimizer_dict = torch.load(optimizer_load_path)
+        #     self.model_optimizer.load_state_dict(optimizer_dict)
+        # else:
+        #     print("Cannot find Adam weights so Adam is randomly initialized")
     
     def load_pseudo_model(self):
         """Load model(s) from disk
