@@ -785,13 +785,12 @@ class Trainer:
             " | loss: {:.5f} | loss day: {:.5f} | loss night: {:.5f}" + \
                 " | loss depth sim: {:.5f} | loss feat sim: {:.5f} |  time elapsed: {} | time left: {}"
         loss = losses["loss"].cpu().data
-        loss_day = 0
+        loss_day = losses["day"].cpu().data
         loss_night = 0
         loss_depth_sim = 0
         loss_feat_sim = 0
     
         if not self.opt.train_day_only:
-            loss_day = losses["day"].cpu().data
             loss_night = losses["night"].cpu().data
             loss_depth_sim = losses["depth_sim"].cpu().data
             loss_feat_sim = losses["feat_sim"].cpu().data
