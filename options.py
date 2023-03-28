@@ -79,9 +79,6 @@ class MonodepthOptions:
                                  type=int,
                                  help="frames to load",
                                  default=[0, -1, 1])
-        self.parser.add_argument("--use_df",
-                                 help="if set, use dynamic filtering",
-                                 action="store_true")
         self.parser.add_argument("--no_percep",
                                  help="if set, don't use perceptual loss",
                                  action="store_true")
@@ -89,8 +86,12 @@ class MonodepthOptions:
                                  help="if set, use depth only for day image reprojection",
                                  action="store_true")
         self.parser.add_argument("--use_stereo",
-                                 help="if set, use day pose for night image",
+                                 help="if set, use stereo images",
                                  action="store_true")
+        self.parser.add_argument("--dida_level",
+                                 type=int,
+                                 help="dida block before what layer",
+                                 default=1)
         self.parser.add_argument("--train_day_only",
                                  help="if set, only train day",
                                  action="store_true")

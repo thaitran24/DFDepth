@@ -61,7 +61,7 @@ class Trainer:
 
         # Shared Encoder
         self.models["encoder"] = networks.ResnetEncoder(
-            self.opt.num_layers, self.opt.weights_init == "pretrained")
+            self.opt.num_layers, self.opt.weights_init == "pretrained", dida_level=self.opt.dida_level)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
 

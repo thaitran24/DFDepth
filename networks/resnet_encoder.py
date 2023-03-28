@@ -12,7 +12,6 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torch.utils.model_zoo as model_zoo
-
 from .dida_module import DIDABlock
 
 class ResNetMultiImageInput(models.ResNet):
@@ -63,7 +62,7 @@ def resnet_multiimage_input(num_layers, pretrained=False, num_input_images=1):
 class ResnetEncoder(nn.Module):
     """Pytorch module for a resnet encoder
     """
-    def __init__(self, num_layers, pretrained, num_input_images=1):
+    def __init__(self, num_layers, pretrained, num_input_images=1, dida_level=1):
         super(ResnetEncoder, self).__init__()
 
         self.num_ch_enc = np.array([64, 64, 128, 256, 512])
@@ -85,18 +84,52 @@ class ResnetEncoder(nn.Module):
         if num_layers > 34:
             self.num_ch_enc[1:] *= 4
 
-        self.didablock = DIDABlock(64, 64)
-
+        self.dida_level = dida_level
+        if self.dida_level == 1:
+            self.layer_dida = DIDABlock(self.num_ch_enc[1], self.num_ch_enc[1])
+        else:
+            self.inplanes = 64
+            self.layer_dida = self._make_dida_layer(DIDABlock, self.num_ch_enc[4], blocks=2, stride=2)
+            
     def forward(self, input_image):
         self.features = []
         x = (input_image - 0.45) / 0.225
         x = self.encoder.conv1(x)
         x = self.encoder.bn1(x)
         x = self.encoder.relu(x)
-        self.features.append(self.didablock(x))
+        if self.dida_level == 1:
+            self.features.append(self.layer_dida(x))
+        elif self.dida_level == 4:
+            self.features.append(self.encoder.maxpool(x))
         self.features.append(self.encoder.layer1(self.encoder.maxpool(self.features[-1])))
         self.features.append(self.encoder.layer2(self.features[-1]))
         self.features.append(self.encoder.layer3(self.features[-1]))
-        self.features.append(self.encoder.layer4(self.features[-1]))
+        if self.dida_level == 4:
+            x1 = self.layer_dida(self.features[-1])
+            x2 = self.encoder.layer4(self.features[-1])
+            self.features.append(x1 + x2)
+        else:
+            self.features.append(self.encoder.layer4(self.features[-1]))
 
         return self.features
+    
+    def _make_dida_layer(self, block, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or self.inplanes != planes * block.expansion:
+            downsample = nn.Sequential(
+                nn.Conv2d(
+                    self.inplanes,
+                    planes * block.expansion,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False
+                ),
+                nn.BatchNorm2d(planes * block.expansion),
+            )
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample))
+        inplanes = planes * block.expansion
+        for i in range(1, blocks):
+            layers.append(block(inplanes, planes))
+
+        return nn.Sequential(*layers)
