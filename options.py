@@ -91,6 +91,9 @@ class MonodepthOptions:
         self.parser.add_argument("--use_stereo",
                                  help="if set, use day pose for night image",
                                  action="store_true")
+        self.parser.add_argument("--train_day_only",
+                                 help="if set, only train day",
+                                 action="store_true")
         self.parser.add_argument("--use_day_pose",
                                  help="if set, use day pose for night image",
                                  action="store_true")

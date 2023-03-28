@@ -135,14 +135,22 @@ class Trainer:
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
 
-        self.pair_dataset = datasets_dict["oxford_pair"]
-        train_dataset = self.pair_dataset(
-            self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
-        self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, True,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
-
+        if not self.train_day_only:
+            self.pair_dataset = datasets_dict["oxford_pair"]
+            train_dataset = self.pair_dataset(
+                self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
+                self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
+            self.train_loader = DataLoader(
+                train_dataset, self.opt.batch_size, True,
+                num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+        else:
+            train_dataset = self.dataset(
+                self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
+                self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
+            self.train_loader = DataLoader(
+                train_dataset, self.opt.batch_size, True,
+                num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+            
         val_day_dataset = self.dataset(
             self.opt.data_path, val_day_filenames, self.opt.height, self.opt.width,
             [0], 4, is_train=False, img_ext='.png')
@@ -261,38 +269,47 @@ class Trainer:
         day_features = self.models["encoder"](inputs["color_aug", 0, 0])
         day_outputs = self.models["depth"](day_features)
 
-        night_features = self.models["encoder"](inputs["color_f_aug", 0, 0])
-        night_outputs = self.models["depth"](night_features)
+        if not self.train_day_only:
+            night_features = self.models["encoder"](inputs["color_f_aug", 0, 0])
+            night_outputs = self.models["depth"](night_features)
 
         day_pose_outputs = self.predict_poses(inputs, day_features, is_night=False)
         day_outputs.update(day_pose_outputs)
-        if self.opt.use_day_pose:
-            for key, value in day_pose_outputs.items():
-                night_outputs[key] = value.detach()
-        else:
-            night_outputs.update(self.predict_poses(inputs, night_features, is_night=True))
+        if not self.train_day_only:
+            if self.opt.use_day_pose:
+                for key, value in day_pose_outputs.items():
+                    night_outputs[key] = value.detach()
+            else:
+                night_outputs.update(self.predict_poses(inputs, night_features, is_night=True))
             
         if not self.opt.only_day_reprojection:
             self.generate_images_pred(inputs, day_outputs, is_night=False)
-            self.generate_images_pred(inputs, night_outputs, is_night=True)
             losses_day = self.compute_losses(inputs, day_outputs, is_night=False)
-            losses_night = self.compute_losses(inputs, night_outputs, is_night=True)
+            if not self.train_day_only:
+                self.generate_images_pred(inputs, night_outputs, is_night=True)
+                losses_night = self.compute_losses(inputs, night_outputs, is_night=True)
         else:
             self.generate_images_pred(inputs, day_outputs, is_night=False)
-            self.generate_images_pred(inputs, night_outputs, is_night=False)
             losses_day = self.compute_losses(inputs, day_outputs, is_night=False)
-            losses_night = self.compute_losses(inputs, night_outputs, is_night=False)
+            if not self.train_day_only:
+                self.generate_images_pred(inputs, night_outputs, is_night=False)
+                losses_night = self.compute_losses(inputs, night_outputs, is_night=False)
 
         losses["day"] = losses_day["loss"]
-        losses["night"] = losses_night["loss"]
-
-        pseudo_label = day_outputs[("disp", 0)].detach()
-        losses["depth_sim"] = self.opt.lambda_depth_sim * self.l1_loss(night_outputs[("disp", 0)], pseudo_label)
+        losses["night"] = 0
+        losses["depth_sim"] = 0
         losses["feat_sim"] = 0
-        for i in range(self.num_scales):
-            losses["feat_sim"] += self.l1_loss(day_features[i].detach(), night_features[i])
-        losses["feat_sim"] /= self.num_scales
-        losses["feat_sim"] *= self.opt.lambda_feat_sim
+
+        if not self.train_day_only:
+            losses["night"] = losses_night["loss"]  
+
+            pseudo_label = day_outputs[("disp", 0)].detach()
+            losses["depth_sim"] = self.opt.lambda_depth_sim * self.l1_loss(night_outputs[("disp", 0)], pseudo_label)
+            losses["feat_sim"] = 0
+            for i in range(self.num_scales):
+                losses["feat_sim"] += self.l1_loss(day_features[i].detach(), night_features[i])
+            losses["feat_sim"] /= self.num_scales
+            losses["feat_sim"] *= self.opt.lambda_feat_sim
 
         losses["loss"] += losses["day"] + losses["night"] + losses["depth_sim"] + losses["feat_sim"]
 
