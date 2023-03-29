@@ -60,8 +60,12 @@ class Trainer:
             self.opt.frame_ids.append("s")
 
         # Shared Encoder
-        self.models["encoder"] = networks.ResnetEncoder(
-            self.opt.num_layers, self.opt.weights_init == "pretrained", dida_level=self.opt.dida_level)
+        if not self.opt.use_ddf:
+            self.models["encoder"] = networks.ResnetDIDA(
+                self.opt.num_layers, self.opt.weights_init == "pretrained", dida_level=self.opt.dida_level)
+        else:
+            self.models["encdoer"] = networks.ResnetDDF(
+                self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
