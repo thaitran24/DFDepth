@@ -276,10 +276,10 @@ class DDFBlock(nn.Module):
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, shortcut=False):
         super().__init__()
-        self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(planes)
+        self.conv1 = DDFPack(inplanes, kernel_size=3, stride=stride)
+        self.bn1 = nn.BatchNorm2d(inplanes)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = DDFPack(planes, kernel_size=3, stride=stride)
+        self.conv2 = nn.Conv2d(inplanes, planes, kernel_size=3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.downsample = downsample
         self.stride = stride

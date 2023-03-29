@@ -88,9 +88,11 @@ class MonodepthOptions:
         self.parser.add_argument("--use_stereo",
                                  help="if set, use stereo images",
                                  action="store_true")
-        self.parser.add_argument("--use_ddf",
-                                 help="if set, use decoupled dynamic filtering",
-                                 action="store_true")
+        self.parser.add_argument("--encoder",
+                                 type=str,
+                                 help="which encoder architecture to use",
+                                 choices=["resnet", "resnet_dida", "resnet_ddf"],
+                                 default="resnet")
         self.parser.add_argument("--dida_level",
                                  type=int,
                                  help="dida block before what layer",
